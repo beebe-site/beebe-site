@@ -412,8 +412,9 @@ class Component extends DCLogic {
   geo() {
     const g = 22;
     const availW = this.state.availW || 0;
-    const cellW = availW ? (availW - g * 2) / 3 : 0;
-    return { g, availW, cellW, cellH: cellW * 0.75, cardW: this.state.cardW || 0 };
+    const cols = this.state.narrowGrid ? 2 : 3;
+    const cellW = availW ? (availW - g * (cols - 1)) / cols : 0;
+    return { g, availW, cellW, cellH: cellW * 0.75, cardW: this.state.cardW || 0, cols };
   }
 
   componentDidMount() {
@@ -485,6 +486,11 @@ class Component extends DCLogic {
     this.onMq = () => this.setState({ mobile: this.mq.matches });
     if (this.mq.addEventListener) this.mq.addEventListener('change', this.onMq); else this.mq.addListener(this.onMq);
     this.setState({ mobile: this.mq.matches });
+    // Phone and tablet widths both read better as a 2-across grid than 3.
+    this.gridMq = window.matchMedia('(max-width: 1024px)');
+    this.onGridMq = () => this.setState({ narrowGrid: this.gridMq.matches });
+    if (this.gridMq.addEventListener) this.gridMq.addEventListener('change', this.onGridMq); else this.gridMq.addListener(this.onGridMq);
+    this.setState({ narrowGrid: this.gridMq.matches });
     this.preloaded = [];
     this.films().forEach(f => f.stills.forEach(src => { const im = new Image(); im.decoding = 'async'; im.src = src; this.preloaded.push(im); }));
     this.timer = setInterval(() => this.setState(s => ({ tick: s.tick + 1 })), (this.props.cycleSeconds ?? 3.5) * 1000);
@@ -500,6 +506,7 @@ class Component extends DCLogic {
     clearTimeout(this.pressT);
     if (this.bannerObs) this.bannerObs.disconnect();
     if (this.mq) { if (this.mq.removeEventListener) this.mq.removeEventListener('change', this.onMq); else this.mq.removeListener(this.onMq); }
+    if (this.gridMq) { if (this.gridMq.removeEventListener) this.gridMq.removeEventListener('change', this.onGridMq); else this.gridMq.removeListener(this.onGridMq); }
     (this.flyTimers || []).forEach(clearTimeout);
   }
 
@@ -579,8 +586,8 @@ class Component extends DCLogic {
 
   cardStyle(n, i, N, fly) {
     if (this.state.grid) {
-      const { g, cellW, cellH, cardW } = this.geo();
-      const row = Math.floor(n / 3), col = n % 3;
+      const { g, cellW, cellH, cardW, cols } = this.geo();
+      const row = Math.floor(n / cols), col = n % cols;
       if (!cardW || !cellW) {
         return {
           position: 'absolute', borderRadius: '3px', perspective: '1600px',
@@ -680,7 +687,11 @@ class Component extends DCLogic {
         stillStyle: { maxWidth: '100%', maxHeight: '100%', width: 'auto', height: 'auto', objectFit: 'contain', display: 'block', cursor: 'pointer', transition: 'transform .8s ease, filter .28s ease', transform: hovered ? 'scale(1.02)' : 'scale(1)', filter: hovered ? 'brightness(0.74)' : 'brightness(1)' },
         overlayStyle: { position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', opacity: hovered ? 1 : 0, transition: 'opacity .28s ease', pointerEvents: 'none' },
         open: this.open(f.link),
-        openStill: (e) => { if (e) e.stopPropagation(); return this.open(f.link)(e); },
+        // In the grid, the still is part of the tap-to-select target like the
+        // rest of the card; the external link only opens once selected into the stack.
+        openStill: this.state.grid
+          ? ((e) => { if (e) { e.preventDefault(); e.stopPropagation(); } this.clearFly(); this.setState({ grid: false, i: idx, hover: -1, flipped: -1, fly: null, drag: null }); })
+          : ((e) => { if (e) e.stopPropagation(); return this.open(f.link)(e); }),
         onEnter: () => this.setState({ hover: idx }),
         onLeave: () => this.setState({ hover: -1 })
       });
@@ -722,15 +733,22 @@ class Component extends DCLogic {
         position: 'absolute', inset: 0, background: 'var(--jb-card)', borderRadius: '3px',
         overflow: 'hidden', backfaceVisibility: 'hidden', WebkitBackfaceVisibility: 'hidden',
         transform: 'translateZ(0.6px)', WebkitTransform: 'translateZ(0.6px)',
-        cursor: c.hasInfo ? 'pointer' : 'default'
+        cursor: (this.state.grid || c.hasInfo) ? 'pointer' : 'default'
       };
-      // The whole card face is the info target — no aiming at the small "i".
-      // A tap that followed a swipe, or that landed on the still, is ignored.
-      c.tapFlip = c.hasInfo ? ((e) => {
+      // In the grid, tapping a card exits back to the stack on that card rather
+      // than flipping in place — flipping still works via the small "i" button,
+      // which stops its own click from bubbling up to this handler.
+      // Outside the grid: the whole card face is the info target (no aiming at
+      // the "i"), and a tap that followed a swipe or landed on the still is ignored.
+      c.tapFlip = this.state.grid ? ((e) => {
+        if (e) { e.preventDefault(); e.stopPropagation(); }
+        this.clearFly();
+        this.setState({ grid: false, i: n, hover: -1, flipped: -1, fly: null, drag: null });
+      }) : (c.hasInfo ? ((e) => {
         if (Date.now() - (this.lastSwipeT || 0) < 400) return;
         if (this.state.drag != null) return;
         this.setState(s => ({ flipped: s.flipped === n ? -1 : n }));
-      }) : null;
+      }) : null);
     });
 
     const mode = this.props.indicator ?? 'Abacus';
@@ -838,8 +856,8 @@ class Component extends DCLogic {
       availRef: this.availRef,
       cardProbeRef: this.cardProbeRef,
       deckStyle: (() => {
-        const { g, availW, cellW, cellH, cardW } = this.geo();
-        const rows = Math.ceil(N / 3);
+        const { g, availW, cellW, cellH, cardW, cols } = this.geo();
+        const rows = Math.ceil(N / cols);
         const shared = { position: 'relative', flex: 'none', touchAction: 'pan-y', transition: 'width .62s cubic-bezier(.22,.85,.28,1), height .62s cubic-bezier(.22,.85,.28,1)' };
         if (grid) {
           return Object.assign({}, shared, availW
