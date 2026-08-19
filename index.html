@@ -13,8 +13,8 @@
 <meta name="twitter:card" content="summary">
 <meta name="twitter:title" content="Jackson Beebe">
 <meta name="twitter:description" content="Director. Los Angeles.">
-<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='64' height='64'%3E%3Ccircle cx='32' cy='32' r='30' fill='%237C7095'/%3E%3C/svg%3E">
-<link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Crect width='180' height='180' fill='%2316112A'/%3E%3Ccircle cx='90' cy='90' r='68' fill='%237C7095'/%3E%3C/svg%3E">
+<link rel="icon" type="image/png" href="img/favicon.png">
+<link rel="apple-touch-icon" href="img/apple-touch-icon.png">
 <meta name="theme-color" media="(prefers-color-scheme: light)" content="#EDE9F2">
 <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#16112A">
 <style>html,body{margin:0;padding:0;min-height:100%;background:#EDE9F2}@media(prefers-color-scheme:dark){html,body{background:#16112A}}</style>
@@ -34,8 +34,8 @@
 <meta name="twitter:card" content="summary">
 <meta name="twitter:title" content="Jackson Beebe">
 <meta name="twitter:description" content="Director. Los Angeles.">
-<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='64' height='64'%3E%3Ccircle cx='32' cy='32' r='30' fill='%237C7095'/%3E%3C/svg%3E">
-<link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Crect width='180' height='180' fill='%2316112A'/%3E%3Ccircle cx='90' cy='90' r='68' fill='%237C7095'/%3E%3C/svg%3E">
+<link rel="icon" type="image/png" href="img/favicon.png">
+<link rel="apple-touch-icon" href="img/apple-touch-icon.png">
 <meta name="theme-color" media="(prefers-color-scheme: light)" content="#EDE9F2">
 <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#16112A">
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -552,9 +552,11 @@ class Component extends DCLogic {
   }
 
   // Delay has to ride inside the shorthand — a separate transitionDelay is overridden by it.
+  // Only transform/opacity animate — left/top/width/height stay fixed across every
+  // card state (stack, fly, grid) so toggling between them never forces layout.
   tr(sec, delayMs) {
     const e = ` ${sec}s cubic-bezier(.22,.85,.28,1) ${delayMs}ms`;
-    return ['left', 'top', 'width', 'height', 'transform'].map(p => p + e).join(', ') + `, opacity .4s ease ${delayMs}ms`;
+    return `transform${e}, opacity .4s ease ${delayMs}ms`;
   }
 
   depthStyle(n, depth, N) {
@@ -577,17 +579,31 @@ class Component extends DCLogic {
 
   cardStyle(n, i, N, fly) {
     if (this.state.grid) {
-      const { g, cellW, cellH } = this.geo();
+      const { g, cellW, cellH, cardW } = this.geo();
       const row = Math.floor(n / 3), col = n % 3;
-      const box = cellW
-        ? { left: (col * (cellW + g)) + 'px', top: (row * (cellH + g)) + 'px', width: cellW + 'px', height: cellH + 'px' }
-        : { left: 0, top: 0, width: '32%', height: '24%' };
-      return Object.assign({
+      if (!cardW || !cellW) {
+        return {
+          position: 'absolute', borderRadius: '3px', perspective: '1600px',
+          left: 0, top: 0, width: '32%', height: '24%',
+          transform: 'none', opacity: 1, pointerEvents: 'auto',
+          zIndex: n === i ? 999 : 10 + ((n - i + N) % N),
+          transition: 'none'
+        };
+      }
+      // Cards are laid out flat in the grid, so position/size travel entirely
+      // through `transform` (translate + uniform scale) off the same fixed
+      // cardW/cardH box the stack uses — never left/top/width/height, and no tilt.
+      const cardH = cardW * 0.75;
+      const s = cellW / cardW;
+      const tx = col * (cellW + g) + cellW / 2 - cardW / 2;
+      const ty = row * (cellH + g) + cellH / 2 - cardH / 2;
+      return {
         position: 'absolute', borderRadius: '3px', perspective: '1600px',
-        transform: `rotate(${this.tilt(n) * 0.5}deg)`, opacity: 1, pointerEvents: 'auto',
+        left: 0, top: 0, width: cardW + 'px', height: cardH + 'px',
+        transform: `translate(${tx}px, ${ty}px) scale(${s})`, opacity: 1, pointerEvents: 'auto',
         zIndex: n === i ? 999 : 10 + ((n - i + N) % N),
         transition: this.tr(.62, (((n - i + N) % N) * 30))
-      }, box);
+      };
     }
     const depth = (n - i + N) % N;
     const base = this.depthStyle(n, depth, N);
